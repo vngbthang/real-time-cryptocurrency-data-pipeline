@@ -1,4 +1,4 @@
-# 💰 Real-Time Cryptocurrency Data Pipeline
+# 💰 Real-Time Cryptocurrency Analytics Pipeline
 
 ## 📋 Mục tiêu (Objective)
 
@@ -99,7 +99,7 @@ Start-Process "http://localhost:8080"
 
 ### Bước 4: Enable Gold Layer Aggregation
 
-In the Airflow UI, unpause the following DAGs:
+Airflow UI, unpause các DAGs:
 - `gold_hourly_aggregation`
 - `gold_10min_aggregation`
 
@@ -115,8 +115,6 @@ docker exec -it postgres-db psql -U user -d crypto_data -c "SELECT symbol, ROUND
 # Check Gold 10-Minute Metrics
 docker exec -it postgres-db psql -U user -d crypto_data -c "SELECT symbol, ROUND(avg_price::numeric, 2) as avg, ROUND(price_volatility::numeric, 2) as volatility FROM gold_10min_metrics ORDER BY window_start DESC LIMIT 5;"
 ```
-
-For more detailed instructions, see the [Deployment Guide](docs/DEPLOYMENT.md).
 
 ## 📈 Kết quả (Final Output)
 
@@ -170,13 +168,6 @@ real-time-cryptocurrency-data-pipeline/
 - ✅ **Orchestration & Monitoring**: Fully automated with Airflow and monitored via Spark UI and Airflow UI.
 - ✅ **Scalability**: Designed for horizontal and vertical scaling.
 - ✅ **Analytics Ready**: Pre-aggregated metrics in the Gold layer for fast BI queries.
-
-## 🔧 Configuration
-
-Key configuration variables can be found in:
-- `coinbase_producer.py` (Kafka servers, poll interval, crypto pairs)
-- `spark-apps/spark_stream_processor.py` (Kafka servers, Spark master, trigger interval)
-- `docker-compose.yml` (Airflow settings)
 
 ## 📚 Deployment Guide (Hướng dẫn Triển khai Chi tiết)
 
