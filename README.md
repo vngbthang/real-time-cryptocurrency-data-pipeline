@@ -14,29 +14,9 @@ Project này xây dựng một **Real-Time ETL Pipeline** hoàn chỉnh theo ki�
 
 ## 🏗️ Kiến trúc (Architecture)
 
-![Architecture](docs/images/architecture.png)  <!-- You can create this image later -->
+![Architecture](docs/images/architecture.png)
 
 **Kiến trúc Medallion**: Bronze (Kafka) → Silver (Raw Data) → Gold (Aggregated Metrics)
-
-**Luồng dữ liệu chi tiết:**
-
-```
-Coinbase API (5 cryptocurrencies)
-    ↓
-Producer (Python + kafka-python) - Poll mỗi 10 giây
-    ↓
-Bronze Layer: Kafka Topic (crypto_prices) - Message streaming
-    ↓
-Spark Structured Streaming - Real-time ETL processing
-    ↓
-Silver Layer: PostgreSQL (crypto_prices_realtime) - Raw structured data
-    ↓
-Airflow DAGs - Scheduled aggregation (every 10 minutes)
-    ↓
-Gold Layer: PostgreSQL (gold_hourly_metrics, gold_10min_metrics) - Analytics tables
-    ↓
-BI Layer: Grafana Dashboards, REST API, pgAdmin
-```
 
 ## 🛠️ Công nghệ sử dụng (Tech Stack)
 
@@ -56,69 +36,11 @@ BI Layer: Grafana Dashboards, REST API, pgAdmin
 
 ### Infrastructure Layout:
 
-```
-Docker Containers (11 services):
-├── zookeeper (Port 2181)
-├── kafka (Ports 9092 internal, 9093 external)
-├── kafka-init (Auto-creates topics)
-├── postgres-db (Port 5432) - Main database
-├── postgres-airflow-db (Port 5433) - Airflow metadata
-├── crypto-producer (Containerized producer)
-├── spark-master (Port 8081)
-├── spark-worker (Port 8082)
-├── airflow-webserver (Port 8080)
-├── airflow-scheduler
-└── airflow-init
-```
+![ArchitectureLayout](docs/images/infralayout.png) 
 
 ### Data Schema:
 
-```
-crypto_data (PostgreSQL Database)
-│
-├── Bronze Layer (Kafka Topic)
-│   └── crypto_prices (topic)
-│       ├── Key: symbol (STRING)
-│       └── Value: JSON {timestamp, symbol, base, currency, price, volume_24h, source, iteration}
-│
-├── Silver Layer (Raw Structured Data)
-│   └── crypto_prices_realtime (table)
-│       ├── timestamp (BIGINT)
-│       ├── symbol (VARCHAR) - e.g., "BTC-USD"
-│       ├── base (VARCHAR) - e.g., "BTC"
-│       ├── currency (VARCHAR) - e.g., "USD"
-│       ├── price (FLOAT)
-│       ├── volume_24h (FLOAT) - 24h trading volume
-│       ├── source (VARCHAR) - "coinbase"
-│       ├── iteration (BIGINT) - Producer iteration number
-│       └── processed_at (TIMESTAMP) - Spark processing timestamp
-│
-└── Gold Layer (Aggregated Analytics)
-    ├── gold_hourly_metrics (table)
-    │   ├── hour_timestamp (TIMESTAMP) - Hour bucket
-    │   ├── symbol (VARCHAR)
-    │   ├── avg_price (FLOAT)
-    │   ├── min_price (FLOAT)
-    │   ├── max_price (FLOAT)
-    │   ├── total_volume (FLOAT) - Sum of volumes in hour
-    │   ├── avg_volume (FLOAT) - Average volume in hour
-    │   ├── price_change (FLOAT) - Change from previous hour
-    │   ├── price_change_percent (FLOAT) - % change from previous hour
-    │   ├── record_count (INT) - Number of data points
-    │   └── created_at (TIMESTAMP)
-    │
-    └── gold_10min_metrics (table)
-        ├── window_start (TIMESTAMP) - 10-minute window start
-        ├── symbol (VARCHAR)
-        ├── avg_price (FLOAT)
-        ├── min_price (FLOAT)
-        ├── max_price (FLOAT)
-        ├── total_volume (FLOAT)
-        ├── avg_volume (FLOAT)
-        ├── price_volatility (FLOAT) - Standard deviation
-        ├── record_count (INT)
-        └── created_at (TIMESTAMP)
-```
+![Schema](docs/images/graph.png) 
 
 ### Tracked Cryptocurrencies:
 
@@ -215,27 +137,26 @@ For more detailed instructions, see the [Deployment Guide](docs/DEPLOYMENT.md).
 ```
 real-time-cryptocurrency-data-pipeline/
 │
-├── docker-compose.yml              # Infrastructure orchestration (9 containers)
+├── docker-compose.yml              # Infrastructure orchestration (11 containers)
+├── Dockerfile.producer             # Containerized producer build file
 ├── requirements.txt                # Python dependencies
 ├── README.md                       # This file
 │
 ├── coinbase_producer.py            # Multi-coin data producer
 │
+├── init-kafka.sh                   # Auto-create Kafka topics on startup
+├── init-airflow.sh                 # Auto-trigger Airflow DAGs (optional)
+├── init-db.sql                     # Auto-create database schema on startup
+│
 ├── spark-apps/
 │   └── spark_stream_processor.py   # Spark Structured Streaming job
 │
 ├── dags/                           # Airflow orchestration
-│   ├── crypto_producer.py
-│   ├── submit_spark_stream.py
-│   ├── gold_aggregation.py
-│   └── gold_10min_aggregation.py
-│
-├── sql/
-│   └── alter_tables_add_volume.sql # Database migration script
-│
-├── docs/
-│   ├── DEPLOYMENT.md               # Complete deployment guide
-│   └── BI_INTEGRATION.md           # BI tools integration guide
+│   ├── auto_startup_pipeline.py    # Auto-startup orchestration
+│   ├── crypto_producer.py          # Producer DAG (alternative)
+│   ├── submit_spark_stream.py      # Main streaming pipeline DAG
+│   ├── gold_aggregation.py         # Hourly metrics aggregation
+│   └── gold_10min_aggregation.py   # 10-minute metrics aggregation
 │
 └── logs/                           # Airflow logs directory
 ```
@@ -260,6 +181,45 @@ Key configuration variables can be found in:
 ## 📚 Deployment Guide (Hướng dẫn Triển khai Chi tiết)
 
 ### 🔍 Monitoring & Verification (Giám sát & Kiểm tra)
+
+#### Initialization Scripts (Scripts Khởi tạo Tự động)
+
+Project sử dụng các script tự động để khởi tạo môi trường:
+
+**1. `init-kafka.sh` (Kafka Initialization)**
+- **Chức năng**: Tự động tạo Kafka topic `crypto_prices` khi Kafka container khởi động
+- **Chi tiết**:
+  - Đợi 30 giây cho Kafka sẵn sàng
+  - Tạo topic với 3 partitions, replication factor = 1
+  - Liệt kê tất cả topics để verify
+- **Container**: `kafka-init` trong docker-compose.yml
+- **Log kiểm tra**:
+```powershell
+docker logs kafka-init
+```
+
+**2. `init-airflow.sh` (Airflow Initialization - Optional)**
+- **Chức năng**: Tự động trigger DAGs khi Airflow khởi động (nếu muốn tự động hóa)
+- **Chi tiết**:
+  - Đợi 60 giây cho Airflow webserver sẵn sàng
+  - Unpause và trigger `crypto_streaming_pipeline`
+  - Unpause `gold_hourly_aggregation` và `gold_10min_aggregation`
+- **Lưu ý**: Script này chưa được tích hợp vào docker-compose (chạy thủ công nếu cần)
+- **Cách chạy thủ công**:
+```powershell
+docker exec -it airflow-webserver bash /opt/airflow/init-airflow.sh
+```
+
+**3. `init-db.sql` (Database Schema Initialization)**
+- **Chức năng**: Tự động tạo database schema khi PostgreSQL container khởi động lần đầu
+- **Chi tiết**:
+  - Tạo 3 bảng: `crypto_prices_realtime`, `gold_hourly_metrics`, `gold_10min_metrics`
+  - Sử dụng `CREATE TABLE IF NOT EXISTS` để tránh lỗi nếu chạy lại
+- **Container**: Mounted vào `postgres-db` tại `/docker-entrypoint-initdb.d/`
+- **Log kiểm tra**:
+```powershell
+docker logs postgres-db | Select-String -Pattern "init-db"
+```
 
 #### Kafka Topics
 ```powershell
@@ -604,12 +564,3 @@ uvicorn api.main:app --reload --port 8000
 ```
 
 Truy cập API docs: http://localhost:8000/docs
-
----
-
-## 📚 Tài liệu tham khảo (References)
-
-- [Coinbase API Documentation](https://docs.cloud.coinbase.com/sign-in-with-coinbase/docs/api-prices)
-- [Spark Structured Streaming Guide](https://spark.apache.org/docs/latest/structured-streaming-programming-guide.html)
-- [Airflow Documentation](https://airflow.apache.org/docs/apache-airflow/stable/)
-- [Kafka Docker Setup](https://developer.confluent.io/quickstart/kafka-docker/)
